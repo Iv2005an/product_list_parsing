@@ -166,30 +166,29 @@ def crop_table(page: Image) -> Image:
         return
     bottom = top
     for _ in range(10):
-        horizontal_line = find_horizontal_line(page, int((right - left) * 0.8), 3, bottom + 30, left)
+        horizontal_line = find_horizontal_line(page, int((right - left) * 0.95), 3, bottom + 30, left)
         if not horizontal_line:
             print('Data table not found')
             return
+        avg_start_finish_y = horizontal_line[0][1] + abs(horizontal_line[0][1] - horizontal_line[1][1]) // 2
+        avg_min_max_y = horizontal_line[2][0] + (horizontal_line[2][1] - horizontal_line[2][0]) // 2
+        avg_y = bottom = min(avg_start_finish_y, avg_min_max_y) + abs(avg_start_finish_y - avg_min_max_y) // 2
         ImageDraw.Draw(page).line((
-            horizontal_line[0][0],
-            horizontal_line[0][1],
-            horizontal_line[1][0],
-            horizontal_line[1][1]), 255, 9)
-        ImageDraw.Draw(page).line((
-            horizontal_line[0][0],
-            horizontal_line[0][1],
-            horizontal_line[1][0],
-            horizontal_line[1][1]), 0, 1)
-        bottom = horizontal_line[2][1]
+            left,
+            avg_y,
+            right,
+            avg_y
+        ), 0, 1)
+
     return page.crop((left, top, right, bottom))
 
 
 def main():
     print('Opening PDF')
-    start_page = 1
+    start_page = 11
     pdf_pages = pdf2image.pdf2image.convert_from_path('test_res/test_pdfs/test.pdf',
                                                       first_page=start_page,
-                                                      # last_page=start_page,
+                                                      last_page=start_page,
                                                       dpi=100,
                                                       poppler_path='poppler/Library/bin')
     for i, page in enumerate(pdf_pages):
