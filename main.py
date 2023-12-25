@@ -1,8 +1,10 @@
-import math
 import os
-from math import acos
+from math import acos, pi
 
+import autocorrect
+import openpyxl
 import pdf2image
+import pytesseract
 from PIL import ImageEnhance, Image, ImageOps, ImageDraw
 
 
@@ -242,10 +244,10 @@ def align_page(page: Image) -> Image:
                 y_a - y_a) ** 2) ** 0.5
         bc = ((x_b - x_b) ** 2 + (
                 y_a - y_b) ** 2) ** 0.5
-        angle = 90 - acos((ab ** 2 + ac ** 2 - bc ** 2) / (2 * ab * ac)) * (180 / math.pi)
+        angle = 90 - acos((ab ** 2 + ac ** 2 - bc ** 2) / (2 * ab * ac)) * (180 / pi)
         if x_a < x_b:
             angle = -angle
-        return page.rotate(angle, fillcolor=255)
+        return page.rotate(angle, fillcolor=255, expand=True)
 
 
 def crop_table(page: Image) -> Image:
@@ -325,8 +327,10 @@ def crop_table(page: Image) -> Image:
 def draw_table(page: Image) -> Image:
     horizontal_line = find_horizontal_line(page, page.width - 10, 3)
     vertical_line_min_length = page.height - 10
+    first_horizontal_line_y = 0
     if horizontal_line:
-        vertical_line_min_length = page.height - horizontal_line[2][1] - 10
+        first_horizontal_line_y = horizontal_line[0][1] - abs(horizontal_line[1][1] - horizontal_line[0][1]) // 2
+        vertical_line_min_length = page.height - first_horizontal_line_y - 10
     horizontal_lines = []
     while horizontal_line:
         horizontal_lines.append(horizontal_line)
@@ -337,22 +341,28 @@ def draw_table(page: Image) -> Image:
     while vertical_line:
         vertical_lines.append(vertical_line)
         avg_x = vertical_line[0][0] - abs(vertical_line[1][0] - vertical_line[1][0]) // 2
+        top = 0
+        if vertical_line[0][1] > 70:
+            top = first_horizontal_line_y
         page_draw.line(
-            (avg_x, 0, avg_x, page.height),
+            (avg_x, top, avg_x, page.height),
             255, 7)
         vertical_line = find_vertical_line(page, vertical_line_min_length, 3, vertical_line[2][1] + 10)
     for horizontal_line in horizontal_lines:
         avg_y = horizontal_line[0][1] - abs(horizontal_line[1][1] - horizontal_line[0][1]) // 2
         page_draw.line(
-            (0, avg_y, page.width, avg_y),
+            (0, horizontal_line[0][1], page.width, horizontal_line[1][1]),
             255, 7)
         page_draw.line(
             (0, avg_y, page.width, avg_y),
             0, 1)
     for vertical_line in vertical_lines:
         avg_x = vertical_line[0][0] - abs(vertical_line[1][0] - vertical_line[1][0]) // 2
+        top = 0
+        if vertical_line[0][1] > 70:
+            top = first_horizontal_line_y
         page_draw.line(
-            (avg_x, 0, avg_x, page.height),
+            (avg_x, top, avg_x, page.height),
             0, 1)
     page_draw.line(
         (page.width - 1, 0, page.width - 1, page.height),
@@ -363,7 +373,7 @@ def draw_table(page: Image) -> Image:
     return page
 
 
-def get_cells_positions(page: Image, page_i: int) -> list | None:
+def get_cells_positions(page: Image, page_i: int = 0) -> list | None:
     print('Finding cells positions')
     horizontal_line = find_horizontal_line(page)
     if not horizontal_line:
@@ -392,6 +402,11 @@ def get_cells_positions(page: Image, page_i: int) -> list | None:
         horizontal_line = find_horizontal_line(page, horizontal_line_min_length,
                                                y_start=70, x_start=x0, x_finish=x1)
         while horizontal_line:
+            if y0 == 0:
+                for combined_cell in combined_cells:
+                    if x0 >= combined_cell[0][0] and x1 <= combined_cell[1][0]:
+                        rows[row_i].insert(0, (
+                            (combined_cell[0][0], combined_cell[0][1]), (combined_cell[1][0], combined_cell[1][1])))
             rows[row_i].insert(0, ((x0, y0), (x1, horizontal_line[0][1])))
             y0 = horizontal_line[0][1] + 1
             horizontal_line = find_horizontal_line(page, horizontal_line_min_length,
@@ -400,28 +415,86 @@ def get_cells_positions(page: Image, page_i: int) -> list | None:
         x0 = x1 + 1
         vertical_line = find_vertical_line(
             page, vertical_line_min_length, x_start=x0 + 5)
-    if not os.path.isdir('images/cells'):
-        os.mkdir('images/cells')
-    if not os.path.isdir(f'images/cells/page_{page_i}'):
-        os.mkdir(f'images/cells/page_{page_i}')
-    for row_i, row in enumerate(rows):
-        if not os.path.isdir(f'images/cells/page_{page_i}/row_{row_i + 1}'):
-            os.mkdir(f'images/cells/page_{page_i}/row_{row_i + 1}')
-        for cell_i, cell in enumerate(row):
-            page.crop((cell[0][0], cell[0][1], cell[1][0], cell[1][1])).save(
-                f'images/cells/page_{page_i}/row_{row_i + 1}/cell_{cell_i + 1}.png')
+    if page_i > 0:
+        if not os.path.isdir('images/cells'):
+            os.mkdir('images/cells')
+        if not os.path.isdir(f'images/cells/page_{page_i}'):
+            os.mkdir(f'images/cells/page_{page_i}')
+        for row_i, row in enumerate(rows):
+            if not os.path.isdir(f'images/cells/page_{page_i}/row_{row_i + 1}'):
+                os.mkdir(f'images/cells/page_{page_i}/row_{row_i + 1}')
+            for cell_i, cell in enumerate(row):
+                angle = -90
+                if cell_i == len(row) - 1:
+                    angle = 180
+                page.crop((cell[0][0], cell[0][1], cell[1][0], cell[1][1])).rotate(angle, expand=True).save(
+                    f'images/cells/page_{page_i}/row_{row_i + 1}/cell_{cell_i + 1}.png')
     if len(rows) > 0:
         return rows
 
 
+def get_cells_data(page: Image, cells_positions: list) -> list | None:
+    print('Getting cells data')
+    speller = autocorrect.Speller('ru')
+    cells_data = []
+    config = ''
+    for row_i, row in enumerate(cells_positions):
+        cells_data.append([])
+        for cell_i, cell in enumerate(row):
+            print(f'Recognizing text ({row_i + 1}, {cell_i + 1})')
+            cell_width = cell[1][0] - cell[0][0]
+            cell_height = cell[1][1] - cell[0][1]
+            cell_max_fill = cell_width * cell_height
+            cell_current_fill = 0
+            for y in range(cell[0][1], cell[1][1]):
+                for x in range(cell[0][0], cell[1][0]):
+                    cell_current_fill += page.getpixel((x, y)) / 255
+            print(cell_current_fill, cell_max_fill, cell_current_fill / cell_max_fill)
+            result = ''
+            if cell_current_fill / cell_max_fill < 0.99:
+                angle = -90
+                if cell_i == len(row) - 1:
+                    angle = 180
+                cell_image = page.crop((cell[0][0], cell[0][1], cell[1][0], cell[1][1])).rotate(
+                    angle, expand=True)
+                cell_image = ImageOps.invert(cell_image)
+                result = pytesseract.image_to_string(cell_image, lang='rus+eng', config=config)
+                result = speller(result)
+            cells_data[row_i].append(result)
+            print(f'Result: {cells_data[row_i][cell_i]}')
+    if len(cells_data) > 0:
+        return cells_data
+
+
+def save_to_excel(cells_data: list, excel_file_path: str, sheet_name: str = None) -> None:
+    print('Saving to excel')
+    if not os.path.exists(excel_file_path):
+        workbook = openpyxl.Workbook()
+        if sheet_name:
+            workbook.active.title = sheet_name
+    else:
+        workbook = openpyxl.load_workbook(excel_file_path)
+    if sheet_name and sheet_name in workbook.sheetnames:
+        worksheet = workbook[sheet_name]
+    else:
+        worksheet = workbook.create_sheet(sheet_name)
+    for row_i, row in enumerate(cells_data):
+        for cell_i, cell in enumerate(row):
+            if len(cell) > 0:
+                worksheet.cell(row_i + 1, cell_i + 1, cell)
+    workbook.save(excel_file_path)
+
+
 def main():
+    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
     if not os.path.isdir('images'):
         os.mkdir('images')
     print('Opening PDF')
-    start_page = 1
-    pdf_pages = pdf2image.pdf2image.convert_from_path('test_res/test_pdfs/test.pdf',
+    file_name = 'test'
+    start_page = 39
+    pdf_pages = pdf2image.pdf2image.convert_from_path(f'test_res/test_pdfs/{file_name}.pdf',
                                                       first_page=start_page,
-                                                      # last_page=start_page,
+                                                      last_page=start_page,
                                                       dpi=100,
                                                       poppler_path='poppler/Library/bin')
     for page_i, page in enumerate(pdf_pages):
@@ -442,7 +515,11 @@ def main():
         if page:
             page = draw_table(page)
         if page:
-            get_cells_positions(page, start_page + page_i)
+            rows = get_cells_positions(page, start_page + page_i)
+            if rows:
+                cells_data = get_cells_data(page, rows)
+                if cells_data:
+                    save_to_excel(cells_data, f'{file_name}.xlsx', f'Страница{start_page + page_i}')
             if not os.path.isdir('images/drawn'):
                 os.mkdir('images/drawn')
             page.save(f'images/drawn/{start_page + page_i}.png')
