@@ -8,14 +8,16 @@ from PIL import ImageEnhance, Image, ImageOps, ImageDraw
 
 def find_horizontal_line(
         page: Image,
-        min_line_length: int,
-        max_hole: int,
+        min_line_length: int = 0,
+        max_hole: int = 0,
         y_start: int = 0,
         x_start: int = 0,
         y_finish: int = 0,
         x_finish: int = 0
 ) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]] | None:
     print('Finding horizontal line')
+    if min_line_length < 1:
+        min_line_length = page.width - 1
     if y_finish < 1 or y_finish > page.height:
         y_finish = page.height
     if x_finish < 1 or x_finish > page.width:
@@ -29,8 +31,8 @@ def find_horizontal_line(
                 x_line_finish = x
                 y_line_finish = y_min = y_max = y
                 while True:
-                    if x_line_finish + 1 < x_finish:
-                        x_line_finish += 1
+                    x_line_finish += 1
+                    if x_line_finish < x_finish:
                         if page.getpixel((x_line_finish, y_line_finish)) == 0:
                             continue
                     bypassed = False
@@ -113,14 +115,16 @@ def find_horizontal_line(
 
 def find_vertical_line(
         page: Image,
-        min_line_length: int,
-        max_hole: int,
+        min_line_length: int = 0,
+        max_hole: int = 0,
         x_start: int = 0,
         y_start: int = 0,
         x_finish: int = 0,
         y_finish: int = 0
 ) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]] | None:
     print('Finding vertical line')
+    if min_line_length < 1:
+        min_line_length = page.height - 1
     if x_finish < 1 or x_finish > page.width:
         x_finish = page.width
     if y_finish < 1 or y_finish > page.height:
@@ -134,8 +138,8 @@ def find_vertical_line(
                 x_line_finish = x_min = x_max = x
                 y_line_finish = y
                 while True:
-                    if y_line_finish + 1 < y_finish:
-                        y_line_finish += 1
+                    y_line_finish += 1
+                    if y_line_finish < y_finish:
                         if page.getpixel((x_line_finish, y_line_finish)) == 0:
                             continue
                     bypassed = False
@@ -334,21 +338,21 @@ def draw_table(page: Image) -> Image:
         vertical_lines.append(vertical_line)
         avg_x = vertical_line[0][0] - abs(vertical_line[1][0] - vertical_line[1][0]) // 2
         page_draw.line(
-            (avg_x, vertical_line[0][1], avg_x, vertical_line[1][1]),
+            (avg_x, 0, avg_x, page.height),
             255, 7)
         vertical_line = find_vertical_line(page, vertical_line_min_length, 3, vertical_line[2][1] + 10)
     for horizontal_line in horizontal_lines:
         avg_y = horizontal_line[0][1] - abs(horizontal_line[1][1] - horizontal_line[0][1]) // 2
         page_draw.line(
-            (horizontal_line[0][0], avg_y, horizontal_line[1][0], avg_y),
+            (0, avg_y, page.width, avg_y),
             255, 7)
         page_draw.line(
-            (horizontal_line[0][0], avg_y, horizontal_line[1][0], avg_y),
+            (0, avg_y, page.width, avg_y),
             0, 1)
     for vertical_line in vertical_lines:
         avg_x = vertical_line[0][0] - abs(vertical_line[1][0] - vertical_line[1][0]) // 2
         page_draw.line(
-            (avg_x, vertical_line[0][1], avg_x, vertical_line[1][1]),
+            (avg_x, 0, avg_x, page.height),
             0, 1)
     page_draw.line(
         (page.width - 1, 0, page.width - 1, page.height),
@@ -361,58 +365,51 @@ def draw_table(page: Image) -> Image:
 
 def get_cells_positions(page: Image, page_i: int) -> list | None:
     print('Finding cells positions')
-    horizontal_line = find_horizontal_line(page, int(page.width * 0.95), 3)
+    horizontal_line = find_horizontal_line(page)
     if not horizontal_line:
         return
     x0 = 0
-    y1 = horizontal_line[2][0]
-    vertical_line = find_vertical_line(
-        page, int(horizontal_line[2][0] * 0.95), 3,
-        0, 0, 0, y1)
+    y1 = horizontal_line[0][1]
+    vertical_line = find_vertical_line(page, horizontal_line[0][1] - 1, y_finish=y1)
     combined_cells = []
     while vertical_line:
-        if vertical_line[2][1] - x0 > 35:
-            combined_cells.append(((x0, 0), (vertical_line[2][1], y1)))
-        x0 = vertical_line[2][1]
-        vertical_line = find_vertical_line(
-            page, int(horizontal_line[2][0] * 0.95), 3,
-            x0 + 5, 0, 0, y1)
-    vertical_line_min_length = int(page.height * 0.95)
+        if vertical_line[0][0] - x0 > 35:
+            combined_cells.append(((x0, 0), (vertical_line[0][0], y1)))
+        x0 = vertical_line[0][0]
+        vertical_line = find_vertical_line(page, horizontal_line[0][1] - 1, x_start=x0 + 1, y_finish=y1)
+    vertical_line_min_length = 0
     if len(combined_cells) > 0:
-        vertical_line_min_length = int((page.height - max(map(lambda xy: xy[1][1], combined_cells))) * 0.95)
+        vertical_line_min_length = page.height - horizontal_line[0][1] - 1
     rows = []
     row_i = 0
     x0 = 0
-    vertical_line = find_vertical_line(
-        page, vertical_line_min_length, 3,
-        x0, 0, 0, 0)
+    vertical_line = find_vertical_line(page, vertical_line_min_length)
     while vertical_line:
         rows.append([])
         x1 = vertical_line[0][0]
         y0 = 0
-        horizontal_line_min_length = int((x1 - x0) * 0.9)
-        horizontal_line = find_horizontal_line(page, horizontal_line_min_length, 3,
-                                               y0, x0, 0, x1)
+        horizontal_line_min_length = x1 - x0 - 1
+        horizontal_line = find_horizontal_line(page, horizontal_line_min_length,
+                                               y_start=70, x_start=x0, x_finish=x1)
         while horizontal_line:
-            rows[row_i].insert(0, ((x0, y0), (x1, horizontal_line[2][0])))
-            y0 = horizontal_line[2][1]
-            horizontal_line = find_horizontal_line(page, horizontal_line_min_length, 3,
-                                                   y0 + 5, x0, 0, x1)
+            rows[row_i].insert(0, ((x0, y0), (x1, horizontal_line[0][1])))
+            y0 = horizontal_line[0][1]
+            horizontal_line = find_horizontal_line(page, horizontal_line_min_length,
+                                                   y_start=y0 + 5, x_start=x0, x_finish=x1)
         row_i += 1
         x0 = x1
         vertical_line = find_vertical_line(
-            page, vertical_line_min_length, 3,
-            x0 + 5, 0, 0, 0)
+            page, vertical_line_min_length, x_start=x0 + 5)
     if not os.path.isdir('images/cells'):
         os.mkdir('images/cells')
-    if not os.path.isdir(f'images/cells/page_{page_i + 1}'):
-        os.mkdir(f'images/cells/page_{page_i + 1}')
+    if not os.path.isdir(f'images/cells/page_{page_i}'):
+        os.mkdir(f'images/cells/page_{page_i}')
     for row_i, row in enumerate(rows):
-        if not os.path.isdir(f'images/cells/page_{page_i + 1}/row_{row_i + 1}'):
-            os.mkdir(f'images/cells/page_{page_i + 1}/row_{row_i + 1}')
+        if not os.path.isdir(f'images/cells/page_{page_i}/row_{row_i + 1}'):
+            os.mkdir(f'images/cells/page_{page_i}/row_{row_i + 1}')
         for cell_i, cell in enumerate(row):
             page.crop((cell[0][0], cell[0][1], cell[1][0], cell[1][1])).save(
-                f'images/cells/page_{page_i + 1}/row_{row_i + 1}/cell_{cell_i + 1}.png')
+                f'images/cells/page_{page_i}/row_{row_i + 1}/cell_{cell_i + 1}.png')
 
 
 def main():
@@ -422,7 +419,7 @@ def main():
     start_page = 1
     pdf_pages = pdf2image.pdf2image.convert_from_path('test_res/test_pdfs/test.pdf',
                                                       first_page=start_page,
-                                                      last_page=start_page,
+                                                      # last_page=start_page,
                                                       dpi=100,
                                                       poppler_path='poppler/Library/bin')
     for page_i, page in enumerate(pdf_pages):
@@ -443,7 +440,7 @@ def main():
         if page:
             page = draw_table(page)
         if page:
-            get_cells_positions(page, page_i)
+            get_cells_positions(page, start_page + page_i)
             if not os.path.isdir('images/drawn'):
                 os.mkdir('images/drawn')
             page.save(f'images/drawn/{start_page + page_i}.png')
