@@ -393,11 +393,11 @@ def get_cells_positions(page: Image, page_i: int) -> list | None:
                                                y_start=70, x_start=x0, x_finish=x1)
         while horizontal_line:
             rows[row_i].insert(0, ((x0, y0), (x1, horizontal_line[0][1])))
-            y0 = horizontal_line[0][1]
+            y0 = horizontal_line[0][1] + 1
             horizontal_line = find_horizontal_line(page, horizontal_line_min_length,
-                                                   y_start=y0 + 5, x_start=x0, x_finish=x1)
+                                                   y_start=y0, x_start=x0, x_finish=x1)
         row_i += 1
-        x0 = x1
+        x0 = x1 + 1
         vertical_line = find_vertical_line(
             page, vertical_line_min_length, x_start=x0 + 5)
     if not os.path.isdir('images/cells'):
@@ -410,6 +410,8 @@ def get_cells_positions(page: Image, page_i: int) -> list | None:
         for cell_i, cell in enumerate(row):
             page.crop((cell[0][0], cell[0][1], cell[1][0], cell[1][1])).save(
                 f'images/cells/page_{page_i}/row_{row_i + 1}/cell_{cell_i + 1}.png')
+    if len(rows) > 0:
+        return rows
 
 
 def main():
